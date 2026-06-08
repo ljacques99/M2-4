@@ -1,0 +1,40 @@
+---
+# ── playbook: rollback.yml ────────────────────────────────────────
+# Vuelve el tráfico a la revisión anterior conocida del servicio Cloud Run.
+#
+# Uso:
+#   ansible-playbook playbooks/rollback.yml -e env=production
+#
+# La revisión anterior se obtiene de la API de Cloud Run.
+
+- name: "Rollback OMS — {{ env | default('?') }}"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars_files:
+    - "../group_vars/all.yml"
+    - "../group_vars/{{ env }}.yml"
+
+  tasks:
+    - name: "Validar entorno"
+      ansible.builtin.assert:
+        that:
+          - env is defined
+          - env in ['staging', 'production']
+
+    - name: "Listar revisiones recientes del servicio"
+      # TODO(alumno): usa el módulo google.cloud.gcp_run_service_info o un
+      # ansible.builtin.command con `gcloud run revisions list` para obtener
+      # las dos últimas revisiones.
+      ansible.builtin.debug:
+        msg: "TODO: listar revisiones de {{ cloud_run_service }}"
+
+    - name: "Asignar 100% del tráfico a la revisión anterior"
+      # TODO(alumno): `gcloud run services update-traffic` con --to-revisions
+      # apuntando a la versión anterior.
+      ansible.builtin.debug:
+        msg: "TODO: redirigir tráfico a la revisión N-1"
+
+    - name: "Anunciar rollback"
+      ansible.builtin.debug:
+        msg: "Rollback completado en {{ env }}. Investiga la causa en {{ slack_channel }}."

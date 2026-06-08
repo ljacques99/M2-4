@@ -1,0 +1,19 @@
+---
+# Variables comunes a TODOS los entornos.
+# Si una variable cambia entre staging y producción, va en su group_vars/<env>.yml.
+# Si no cambia, va aquí.
+
+project_prefix: "oms"
+region:         "europe-west3"
+image_repo:     "europe-west3-docker.pkg.dev/{{ gcp_project }}/oms"
+
+# El SHA de la imagen se pasa por -e en el comando, NO se hardcodea.
+# Esto garantiza que el mismo SHA viaja a través de la promoción.
+# image_sha: ← se pasa con -e image_sha=sha256:...
+
+# Healthcheck endpoint
+health_path: "/healthz"
+container_port: 8080
+
+# Cloud Run service name pattern
+cloud_run_service: "{{ project_prefix }}-{{ env }}"

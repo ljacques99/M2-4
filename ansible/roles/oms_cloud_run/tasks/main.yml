@@ -1,0 +1,69 @@
+---
+# ── role: oms_cloud_run ─────────────────────────────────────────
+# Despliega/actualiza el servicio Cloud Run del OMS al SHA pedido.
+# Debe ser IDEMPOTENTE — segunda ejecución con mismo SHA = changed=0.
+
+- name: "Verificar que gcloud está autenticado en el proyecto correcto"
+  ansible.builtin.command:
+    cmd: gcloud config get-value project
+  register: gcloud_project
+  changed_when: false
+  failed_when: gcloud_project.stdout != gcp_project
+
+- name: "Comprobar si la revisión con este SHA ya existe"
+  # Si la imagen exacta ya está desplegada Y recibe tráfico, no hacemos nada.
+  ansible.builtin.command:
+    cmd: >-
+      gcloud run services describe {{ cloud_run_service }}
+      --region={{ region }}
+      --format=value(spec.template.spec.containers[0].image)
+  register: current_image
+  changed_when: false
+  failed_when: false   # primera vez no existe el servicio, no es error
+
+- name: "Mostrar comparación de imágenes"
+  ansible.builtin.debug:
+    msg: |
+      Imagen desplegada actualmente: {{ current_image.stdout | default('(ninguna)') }}
+      Imagen objetivo:                {{ full_image }}
+
+- name: "Desplegar nueva revisión de Cloud Run"
+  # TODO(alumno): usa el módulo google.cloud.gcp_run_service (preferido) o
+  # un command con `gcloud run deploy`. El comando debe:
+  #   - apuntar al image por DIGEST (no tag mutable)
+  #   - aplicar min/max instances de los group_vars
+  #   - inyectar env vars y secret refs
+  #   - NO recibir tráfico aún (--no-traffic) si traffic_percent < 100
+  ansible.builtin.command:
+    cmd: >-
+      gcloud run deploy {{ cloud_run_service }}
+      --image={{ full_image }}
+      --region={{ region }}
+      --min-instances={{ cloud_run_min_instances }}
+      --max-instances={{ cloud_run_max_instances }}
+      --cpu={{ cloud_run_cpu }}
+      --memory={{ cloud_run_memory }}
+      --no-traffic
+      --tag=rev-{{ image_sha | regex_replace('^sha256:(.{8}).*', '\\1') }}
+      --quiet
+  register: deploy_result
+  changed_when: "'No changes' not in deploy_result.stderr"
+  when: current_image.stdout != full_image
+
+- name: "Redirigir tráfico a la nueva revisión"
+  # TODO(alumno): aplica el traffic_percent de los group_vars.
+  # En staging suele ser 100% (big-bang acepta el riesgo).
+  # En producción suele empezar en 10% y subir gradualmente con verificación.
+  ansible.builtin.command:
+    cmd: >-
+      gcloud run services update-traffic {{ cloud_run_service }}
+      --region={{ region }}
+      --to-tags=rev-{{ image_sha | regex_replace('^sha256:(.{8}).*', '\\1') }}={{ traffic_percent }}
+      --quiet
+  register: traffic_result
+  changed_when: "'No changes' not in traffic_result.stderr"
+  when: current_image.stdout != full_image
+
+# TODO(alumno) [opcional, bonus]: añade un paso que espere a que la nueva
+# revisión esté Ready antes de devolver el control:
+#   gcloud run revisions describe ... --format=value(status.conditions[0].status)

@@ -1,0 +1,23 @@
+---
+# ── STAGING ──────────────────────────────────────────────
+# Diferencias legítimas con producción: capacidad y endpoints.
+# Cualquier otra cosa que cambie aquí, justifícala en el PR.
+
+env:         "staging"
+gcp_project: "TODO-acme-oms-staging"
+
+# Capacidad — ajustada a tráfico de QA
+cloud_run_min_instances: 0
+cloud_run_max_instances: 5
+cloud_run_cpu:    "1000m"
+cloud_run_memory: "1Gi"
+
+# Endpoints
+db_instance_connection: "{{ gcp_project }}:{{ region }}:oms-staging-postgres"
+redis_endpoint:         "TODO_REDIS_IP_DE_TERRAFORM_OUTPUT"
+
+# Tráfico
+traffic_percent: 100   # staging recibe el 100% de la nueva revisión inmediatamente
+
+# Notificaciones
+slack_channel: "#deploys-staging"

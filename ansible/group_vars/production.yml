@@ -1,0 +1,26 @@
+---
+# ── PRODUCTION ───────────────────────────────────────────
+# La ÚNICA diferencia legítima respecto a staging.yml es esta lista.
+# `diff group_vars/staging.yml group_vars/production.yml` debe ser corto
+# y cada línea explicable en un PR.
+
+env:         "production"
+gcp_project: "TODO-acme-oms-production"
+
+# Capacidad — dimensionada para tráfico real con headroom 30% (NFR-SCAL-002)
+cloud_run_min_instances: 2     # nunca a cero: evita cold starts en producción
+cloud_run_max_instances: 25    # NFR-SCAL-001: pico 5×
+cloud_run_cpu:    "2000m"
+cloud_run_memory: "2Gi"
+
+# Endpoints
+db_instance_connection: "{{ gcp_project }}:{{ region }}:oms-production-postgres"
+redis_endpoint:         "TODO_REDIS_IP_DE_TERRAFORM_OUTPUT_PROD"
+
+# Tráfico — promoción gradual (no big-bang en producción)
+# El playbook arranca con 10% y va subiendo si los SLOs aguantan.
+traffic_percent: 10            # canary inicial; el playbook lo escalará
+
+# Notificaciones
+slack_channel: "#deploys-production"
+pagerduty_routing_key: "TODO_PAGERDUTY_KEY"

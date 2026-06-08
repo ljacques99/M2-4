@@ -1,0 +1,62 @@
+---
+# ── playbook: deploy.yml ──────────────────────────────────────────
+# Despliega un image_sha concreto al entorno indicado.
+#
+# Uso:
+#   ansible-playbook playbooks/deploy.yml \
+#     -e env=staging \
+#     -e image_sha=sha256:a1b2c3d4...
+#
+# Idempotencia: ejecutar dos veces seguidas con el mismo image_sha
+# debe devolver changed=0 la segunda vez.
+
+- name: "Deploy OMS — {{ env | default('?') }}"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars_files:
+    - "../group_vars/all.yml"
+    - "../group_vars/{{ env }}.yml"
+
+  pre_tasks:
+    - name: "Validar parámetros obligatorios"
+      ansible.builtin.assert:
+        that:
+          - env is defined
+          - env in ['staging', 'production']
+          - image_sha is defined
+          - image_sha is match('^sha256:[a-f0-9]{64}$')
+        fail_msg: |
+          Faltan parámetros o image_sha no es un digest válido.
+          Uso: ansible-playbook playbooks/deploy.yml \
+                 -e env=<staging|production> \
+                 -e image_sha=sha256:<64 hex chars>
+
+    - name: "Mostrar resumen del despliegue"
+      ansible.builtin.debug:
+        msg: |
+          ╔═══════════════════════════════════════════════════════════╗
+          ║  Entorno:        {{ env }}
+          ║  Proyecto GCP:   {{ gcp_project }}
+          ║  Servicio:       {{ cloud_run_service }}
+          ║  Imagen:         {{ image_repo }}@{{ image_sha }}
+          ║  Min/Max inst:   {{ cloud_run_min_instances }}/{{ cloud_run_max_instances }}
+          ║  Tráfico nuevo:  {{ traffic_percent }}%
+          ╚═══════════════════════════════════════════════════════════╝
+
+  roles:
+    - role: oms_cloud_run
+      vars:
+        full_image: "{{ image_repo }}@{{ image_sha }}"
+
+  post_tasks:
+    - name: "Verificar healthcheck del servicio desplegado"
+      # TODO(alumno): usa ansible.builtin.uri para hacer GET al /healthz
+      # del Cloud Run y comprobar que responde 200 antes de declarar éxito.
+      ansible.builtin.debug:
+        msg: "TODO: implementar healthcheck post-deploy contra {{ cloud_run_service }}"
+
+    - name: "Notificar a Slack"
+      # TODO(alumno) [bonus]: notifica al canal correspondiente con el SHA desplegado.
+      ansible.builtin.debug:
+        msg: "TODO: avisar a {{ slack_channel }} de despliegue de {{ image_sha }}"
