@@ -10,9 +10,10 @@ variable "region" {
   description = "Región principal. REG-GDPR-001 limita a regiones europeas."
   default     = "europe-west3"
   validation {
-    # TODO(alumno): añade una validación que prohíba regiones fuera de la UE.
-    condition     = startswith(var.region, "europe-")
-    error_message = "REG-GDPR-001 exige una región europea (europe-*)."
+    # REG-GDPR-001: europe-west3 es la región obligatoria; europe-central2
+    # solo se admite para la réplica DR del bonus multi-región.
+    condition     = contains(["europe-west3", "europe-central2"], var.region)
+    error_message = "REG-GDPR-001 exige europe-west3 (obligatoria) o europe-central2 (solo DR)."
   }
 }
 
@@ -33,9 +34,7 @@ variable "vpc_cidr" {
 
 variable "db_tier" {
   type        = string
-  description = "Tier de Cloud SQL. Cambia entre entornos."
-  # TODO(alumno): elige tier sensato por entorno (ej. db-custom-2-7680 en staging,
-  # db-custom-4-15360 en producción) y reflexiona en el README por qué.
+  description = "Tier de Cloud SQL. staging usa db-custom-2-7680 (2 vCPU/7.5GB); producción usa db-custom-4-15360 (4 vCPU/15GB) — ver 'Decisiones' en el README."
 }
 
 variable "cloud_run_min_instances" {
@@ -70,4 +69,9 @@ variable "github_repository" {
   type        = string
   description = "Repo GitHub que puede impersonar el SA vía WIF (formato owner/repo)."
   default     = "acme-org/oms-platform"
+}
+
+variable "domain_name" {
+  type        = string
+  description = "Dominio público servido por el Load Balancer (usado en el certificado SSL gestionado)."
 }

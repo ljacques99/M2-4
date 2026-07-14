@@ -2,11 +2,11 @@
 # Workload Identity Federation para que GitHub Actions despliegue
 # SIN claves estáticas (Vídeo 4). Service Accounts con scope mínimo.
 
-variable "project_id"        { type = string }
-variable "env"               { type = string }
-variable "github_repository" { type = string }   # formato "owner/repo"
-variable "cloud_run_sa"      { type = string }   # email del SA del runtime
-variable "labels"            { type = map(string) }
+variable "project_id" { type = string }
+variable "env" { type = string }
+variable "github_repository" { type = string } # formato "owner/repo"
+variable "cloud_run_sa" { type = string }      # email del SA del runtime
+variable "labels" { type = map(string) }
 
 # ─── Workload Identity Pool ──────────────────────────────────────
 resource "google_iam_workload_identity_pool" "github" {
@@ -19,9 +19,13 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = "github-provider"
 
+  # Sin allowed_audiences explícito: por defecto GCP acepta como audiencia el
+  # resource name completo de este provider, que es justo lo que envía
+  # google-github-actions/auth. (Un error común copiado de tutoriales viejos
+  # es poner aquí "sts.amazonaws.com" — eso es un artefacto de AWS STS y hace
+  # que la validación del token OIDC falle contra GCP).
   oidc {
-    issuer_uri        = "https://token.actions.githubusercontent.com"
-    allowed_audiences = ["sts.amazonaws.com"]
+    issuer_uri = "https://token.actions.githubusercontent.com"
   }
 
   attribute_mapping = {
@@ -55,19 +59,19 @@ resource "google_service_account_iam_binding" "cicd_wif" {
 }
 
 # ─── Permisos del SA de CI/CD (principio de mínimo privilegio) ──
-# TODO(alumno): asigna SOLO los roles que necesita el pipeline.
-# Pista mínima:
-#   - roles/run.developer            (desplegar revisiones de Cloud Run)
-#   - roles/iam.serviceAccountUser   (poder usar el SA del runtime)
-#   - roles/artifactregistry.writer  (publicar imágenes Docker)
-# Y NUNCA roles/owner ni roles/editor.
-
+# Nunca roles/owner ni roles/editor. Cada rol está justificado en el README
+# (sección Decisiones):
+#   - roles/run.developer            despliega/actualiza revisiones de Cloud Run
+#   - roles/iam.serviceAccountUser   necesario para desplegar un servicio que
+#                                     corre "as" el SA de runtime (oms-<env>-runtime)
+#   - roles/artifactregistry.writer  publica imágenes en el repo Docker
+#   - roles/logging.logWriter        el propio workflow escribe logs de build/deploy
 locals {
   cicd_roles = [
     "roles/run.developer",
     "roles/iam.serviceAccountUser",
     "roles/artifactregistry.writer",
-    # TODO(alumno): añade los que falten y justifica en el README
+    "roles/logging.logWriter",
   ]
 }
 

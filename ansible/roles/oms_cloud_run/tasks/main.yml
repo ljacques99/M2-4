@@ -6,9 +6,9 @@
 - name: "Verificar que gcloud está autenticado en el proyecto correcto"
   ansible.builtin.command:
     cmd: gcloud config get-value project
-  register: gcloud_project
+  register: oms_cloud_run_gcloud_project
   changed_when: false
-  failed_when: gcloud_project.stdout != gcp_project
+  failed_when: oms_cloud_run_gcloud_project.stdout != gcp_project
 
 - name: "Comprobar si la revisión con este SHA ya existe"
   # Si la imagen exacta ya está desplegada Y recibe tráfico, no hacemos nada.
@@ -17,27 +17,30 @@
       gcloud run services describe {{ cloud_run_service }}
       --region={{ region }}
       --format=value(spec.template.spec.containers[0].image)
-  register: current_image
+  register: oms_cloud_run_current_image
   changed_when: false
   failed_when: false   # primera vez no existe el servicio, no es error
 
 - name: "Mostrar comparación de imágenes"
   ansible.builtin.debug:
     msg: |
-      Imagen desplegada actualmente: {{ current_image.stdout | default('(ninguna)') }}
-      Imagen objetivo:                {{ full_image }}
+      Imagen desplegada actualmente: {{ oms_cloud_run_current_image.stdout | default('(ninguna)') }}
+      Imagen objetivo:                {{ oms_cloud_run_full_image }}
 
+# NOTA: la colección google.cloud (v1.13.0, la última publicada) NO trae
+# ningún módulo gcp_run_service / gcp_cloudrun_* — Cloud Run nunca llegó a
+# tener soporte GA en ansible.cloud.google (se puede comprobar: no aparece
+# en `ansible-doc -l google.cloud` ni en su repo de plugins/modules). El
+# enunciado sugiere ese módulo pero no existe hoy, así que la alternativa
+# real e idempotente es `gcloud run deploy` vía command, con un
+# `changed_when` que compara el estado antes/después en vez de fiarnse del
+# código de salida (ver task anterior "Comprobar si la revisión..." y el
+# changed_when de abajo, que detecta el "No changes" real que devuelve gcloud).
 - name: "Desplegar nueva revisión de Cloud Run"
-  # TODO(alumno): usa el módulo google.cloud.gcp_run_service (preferido) o
-  # un command con `gcloud run deploy`. El comando debe:
-  #   - apuntar al image por DIGEST (no tag mutable)
-  #   - aplicar min/max instances de los group_vars
-  #   - inyectar env vars y secret refs
-  #   - NO recibir tráfico aún (--no-traffic) si traffic_percent < 100
   ansible.builtin.command:
     cmd: >-
       gcloud run deploy {{ cloud_run_service }}
-      --image={{ full_image }}
+      --image={{ oms_cloud_run_full_image }}
       --region={{ region }}
       --min-instances={{ cloud_run_min_instances }}
       --max-instances={{ cloud_run_max_instances }}
@@ -46,24 +49,44 @@
       --no-traffic
       --tag=rev-{{ image_sha | regex_replace('^sha256:(.{8}).*', '\\1') }}
       --quiet
-  register: deploy_result
-  changed_when: "'No changes' not in deploy_result.stderr"
-  when: current_image.stdout != full_image
+  register: oms_cloud_run_deploy_result
+  changed_when: "'No changes' not in oms_cloud_run_deploy_result.stderr"
+  when: oms_cloud_run_current_image.stdout != oms_cloud_run_full_image
 
+- name: "Obtener nombre de la revisión recién creada"
+  ansible.builtin.command:
+    cmd: >-
+      gcloud run services describe {{ cloud_run_service }}
+      --region={{ region }}
+      --format=value(status.latestCreatedRevisionName)
+  register: oms_cloud_run_latest_revision
+  changed_when: false
+  when: oms_cloud_run_current_image.stdout != oms_cloud_run_full_image
+
+- name: "Esperar a que la nueva revisión esté Ready"
+  ansible.builtin.command:
+    cmd: >-
+      gcloud run revisions describe {{ oms_cloud_run_latest_revision.stdout }}
+      --region={{ region }}
+      --format=value(status.conditions[0].status)
+  register: oms_cloud_run_revision_ready
+  changed_when: false
+  retries: 10
+  delay: 6
+  until: oms_cloud_run_revision_ready.stdout == "True"
+  when: oms_cloud_run_current_image.stdout != oms_cloud_run_full_image
+
+# traffic_percent controla cuánto tráfico recibe la revisión nueva:
+#   - staging: 100% (big-bang, el enunciado acepta el riesgo en QA)
+#   - production: arranca en 10% (canary); subir el resto es una promoción
+#     posterior deliberada, no algo que este playbook automatice solo.
 - name: "Redirigir tráfico a la nueva revisión"
-  # TODO(alumno): aplica el traffic_percent de los group_vars.
-  # En staging suele ser 100% (big-bang acepta el riesgo).
-  # En producción suele empezar en 10% y subir gradualmente con verificación.
   ansible.builtin.command:
     cmd: >-
       gcloud run services update-traffic {{ cloud_run_service }}
       --region={{ region }}
       --to-tags=rev-{{ image_sha | regex_replace('^sha256:(.{8}).*', '\\1') }}={{ traffic_percent }}
       --quiet
-  register: traffic_result
-  changed_when: "'No changes' not in traffic_result.stderr"
-  when: current_image.stdout != full_image
-
-# TODO(alumno) [opcional, bonus]: añade un paso que espere a que la nueva
-# revisión esté Ready antes de devolver el control:
-#   gcloud run revisions describe ... --format=value(status.conditions[0].status)
+  register: oms_cloud_run_traffic_result
+  changed_when: "'No changes' not in oms_cloud_run_traffic_result.stderr"
+  when: oms_cloud_run_current_image.stdout != oms_cloud_run_full_image

@@ -47,16 +47,46 @@
   roles:
     - role: oms_cloud_run
       vars:
-        full_image: "{{ image_repo }}@{{ image_sha }}"
+        oms_cloud_run_full_image: "{{ image_repo }}@{{ image_sha }}"
 
   post_tasks:
+    - name: "Obtener URL del servicio Cloud Run"
+      ansible.builtin.command:
+        cmd: >-
+          gcloud run services describe {{ cloud_run_service }}
+          --region={{ region }}
+          --format=value(status.url)
+      register: service_url
+      changed_when: false
+
+    # NOTA — verificado con un deploy real: el dominio público por defecto de
+    # Cloud Run (*.a.run.app) es servido por el mismo Google Frontend que usa
+    # www.google.com, y ESE borde intercepta la ruta literal "/healthz" antes
+    # de que llegue al contenedor (devuelve el 404 genérico de Google, no un
+    # 404 de la app ni de Cloud Run). Se comprobó con curl contra la URL
+    # principal, la URL con tag de revisión y varias rutas de control
+    # (/health, /healthcheck, /foo, / — todas responden 200 salvo /healthz).
+    # Los health/liveness probes INTERNOS de Cloud Run (terraform/modules/
+    # compute/main.tf) sí usan /healthz sin problema porque no atraviesan ese
+    # borde público. Por eso esta verificación externa golpea "/" — el mismo
+    # servidor Node.js, pero por una ruta que Google no se reserva.
     - name: "Verificar healthcheck del servicio desplegado"
-      # TODO(alumno): usa ansible.builtin.uri para hacer GET al /healthz
-      # del Cloud Run y comprobar que responde 200 antes de declarar éxito.
-      ansible.builtin.debug:
-        msg: "TODO: implementar healthcheck post-deploy contra {{ cloud_run_service }}"
+      ansible.builtin.uri:
+        url: "{{ service_url.stdout }}/"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: health_result
+      retries: 5
+      delay: 6
+      until: health_result.status == 200
 
     - name: "Notificar a Slack"
-      # TODO(alumno) [bonus]: notifica al canal correspondiente con el SHA desplegado.
+      # bonus: sin webhook configurado en este ejercicio, se deja el mensaje
+      # formateado listo para un ansible.builtin.uri POST a un Slack Incoming
+      # Webhook (community.general.slack también serviría) el día que exista
+      # el secreto SLACK_WEBHOOK_URL en el entorno de CI.
       ansible.builtin.debug:
-        msg: "TODO: avisar a {{ slack_channel }} de despliegue de {{ image_sha }}"
+        msg: |
+          [{{ slack_channel }}] Despliegue OK en {{ env }}: {{ cloud_run_service }} → {{ image_sha }}
+          URL: {{ service_url.stdout }}/ respondió 200

@@ -1,0 +1,11 @@
+{
+  "name": "oms-platform-smoke-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stub HTTP server usado SOLO para validar el pipeline de infraestructura (Docker, Cloud Run, CI/CD, Ansible). No es la implementación del OMS — ese trabajo llega en un bloque posterior (ver Trabajo - enunciado.md, sección 1).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  }
+}

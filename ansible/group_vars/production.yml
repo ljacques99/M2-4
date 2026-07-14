@@ -5,7 +5,7 @@
 # y cada línea explicable en un PR.
 
 env:         "production"
-gcp_project: "TODO-acme-oms-production"
+gcp_project: "acmeoms-platform-prod"
 
 # Capacidad — dimensionada para tráfico real con headroom 30% (NFR-SCAL-002)
 cloud_run_min_instances: 2     # nunca a cero: evita cold starts en producción
@@ -15,7 +15,7 @@ cloud_run_memory: "2Gi"
 
 # Endpoints
 db_instance_connection: "{{ gcp_project }}:{{ region }}:oms-production-postgres"
-redis_endpoint:         "TODO_REDIS_IP_DE_TERRAFORM_OUTPUT_PROD"
+redis_endpoint:         "172.21.49.228"  # terraform output redis_host (módulo database, env production)
 
 # Tráfico — promoción gradual (no big-bang en producción)
 # El playbook arranca con 10% y va subiendo si los SLOs aguantan.
@@ -23,4 +23,7 @@ traffic_percent: 10            # canary inicial; el playbook lo escalará
 
 # Notificaciones
 slack_channel: "#deploys-production"
-pagerduty_routing_key: "TODO_PAGERDUTY_KEY"
+# Sin cuenta PagerDuty real en este ejercicio: se deja sin valor a propósito
+# (en vez de un placeholder falso) para que un `-e pagerduty_routing_key=...`
+# explícito sea obligatorio el día que exista una integración real.
+pagerduty_routing_key: ""

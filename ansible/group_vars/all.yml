@@ -5,7 +5,11 @@
 
 project_prefix: "oms"
 region:         "europe-west3"
-image_repo:     "europe-west3-docker.pkg.dev/{{ gcp_project }}/oms"
+# Formato Artifact Registry: LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE.
+# El repo se llama "oms" (terraform/modules/compute/main.tf, repository_id)
+# y la imagen dentro de ese repo también se llama "oms" — de ahí el
+# ".../oms/oms" (no es un error de copy-paste, son dos niveles distintos).
+image_repo:     "europe-west3-docker.pkg.dev/{{ gcp_project }}/oms/oms"
 
 # El SHA de la imagen se pasa por -e en el comando, NO se hardcodea.
 # Esto garantiza que el mismo SHA viaja a través de la promoción.

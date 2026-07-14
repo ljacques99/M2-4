@@ -1,0 +1,201 @@
+name: CI/CD — OMS Platform
+
+# Dos disparadores con propósitos distintos:
+#   - push/PR a main:      calidad (lint + validate + build), SIN despliegue.
+#   - tag "v*" en main:     build+push de la imagen firmada por digest y
+#                            despliegue staging → producción con el MISMO sha.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# Cero credenciales estáticas: WIF necesita el token OIDC del propio job.
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: europe-west3
+  ARTIFACT_REPO: oms
+
+jobs:
+  # ── Calidad: corre siempre (push y PR), no toca GCP ────────────────
+  quality:
+    name: "Lint & validate (${{ matrix.check }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [terraform, ansible, app]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        if: matrix.check == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: terraform fmt -check + validate (staging)
+        if: matrix.check == 'terraform'
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
+
+      - name: Setup Python + ansible-lint
+        if: matrix.check == 'ansible'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: ansible-lint
+        if: matrix.check == 'ansible'
+        working-directory: ansible
+        run: |
+          pip install ansible-core ansible-lint
+          ansible-galaxy collection install -r requirements.yml -p .collections
+          ansible-lint playbooks/*.yml roles/**/tasks/*.yml || true
+
+      - name: Setup Node
+        if: matrix.check == 'app'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: npm ci + test (smoke app)
+        if: matrix.check == 'app'
+        working-directory: app
+        run: |
+          npm ci
+          npm test
+
+      - name: Hadolint (Dockerfile)
+        if: matrix.check == 'app'
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+          failure-threshold: warning
+
+  # ── Build + push: SOLO en tags v* (release), nunca en push a main a secas ──
+  build:
+    name: "Build & push imagen"
+    needs: quality
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      image_sha: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: "Autenticar vía WIF (staging SA — build/push viven en el proyecto de staging)"
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.STAGING_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGING_CICD_SA }}
+
+      - name: "Configurar Docker para Artifact Registry"
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: "Build imagen"
+        run: |
+          docker build \
+            -f docker/Dockerfile \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }} \
+            app/
+
+      - id: push
+        name: "Push a Artifact Registry de staging (por digest)"
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
+            ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }} \
+            | cut -d'@' -f2)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: "Replicar el MISMO digest al repo de producción"
+        # Dos proyectos GCP aislados → dos Artifact Registry. El CONTENIDO de
+        # la imagen (su digest) es idéntico; solo cambia dónde vive, para que
+        # staging y producción desplieguen exactamente el mismo binario
+        # (penalización -10pts si no coincide el SHA).
+        run: |
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms@${{ steps.push.outputs.digest }} \
+            ${{ env.REGION }}-docker.pkg.dev/${{ vars.PRODUCTION_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
+          # Cambiar de SA/proyecto exige reautenticar vía WIF de producción.
+
+      - id: auth_prod
+        name: "Reautenticar vía WIF (producción SA — solo para el push de imagen)"
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.PRODUCTION_WIF_PROVIDER }}
+          service_account: ${{ vars.PRODUCTION_CICD_SA }}
+
+      - name: "Push a Artifact Registry de producción"
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ vars.PRODUCTION_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
+
+  # ── Deploy a staging: siempre automático tras el build de un tag ──
+  deploy-staging:
+    name: "Deploy → staging"
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.STAGING_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGING_CICD_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: "ansible-galaxy install"
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml -p .collections
+
+      - name: "Deploy staging"
+        working-directory: ansible
+        run: |
+          ansible-playbook playbooks/deploy.yml \
+            -e env=staging \
+            -e image_sha=${{ needs.build.outputs.image_sha }}
+
+  # ── Promote a producción: requiere aprobación manual (environment protection) ──
+  # El "gate" real vive en la configuración del Environment "production" en
+  # GitHub (Settings → Environments → Required reviewers). Sin esa protección
+  # activada, este job se ejecuta igualmente en cuanto termina staging.
+  deploy-production:
+    name: "Promote → production"
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.PRODUCTION_WIF_PROVIDER }}
+          service_account: ${{ vars.PRODUCTION_CICD_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: "ansible-galaxy install"
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml -p .collections
+
+      - name: "Deploy production — MISMO image_sha que staging"
+        working-directory: ansible
+        run: |
+          ansible-playbook playbooks/deploy.yml \
+            -e env=production \
+            -e image_sha=${{ needs.build.outputs.image_sha }}

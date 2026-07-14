@@ -1,0 +1,30 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Ansible
+ansible/.collections/
+*.retry
+
+# Node (app/ stub)
+app/node_modules/
+npm-debug.log*
+
+# Docker
+*.tar
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

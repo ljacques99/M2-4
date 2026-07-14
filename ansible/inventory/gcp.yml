@@ -9,9 +9,15 @@
 # Uso:
 #   ansible-inventory -i inventory/gcp.yml --graph
 
+# El plugin gcp_compute NO templa Jinja/lookup() dentro de `projects:` (se
+# comprobó en ejecución real: pasa el string "{{ lookup(...) }}" sin evaluar
+# a la API y GCP responde 403). Por eso aquí van los dos proyectos reales en
+# vez de una variable de entorno — de todas formas el objetivo de este
+# inventario es descubrir bastions en CUALQUIERA de los dos entornos.
 plugin: google.cloud.gcp_compute
 projects:
-  - "{{ lookup('env', 'GCP_PROJECT') | default('TODO-acme-oms-staging', true) }}"
+  - acmeoms-platform
+  - acmeoms-platform-prod
 zones:
   - europe-west3-a
   - europe-west3-b

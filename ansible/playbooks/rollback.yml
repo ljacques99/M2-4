@@ -22,18 +22,42 @@
           - env is defined
           - env in ['staging', 'production']
 
-    - name: "Listar revisiones recientes del servicio"
-      # TODO(alumno): usa el módulo google.cloud.gcp_run_service_info o un
-      # ansible.builtin.command con `gcloud run revisions list` para obtener
-      # las dos últimas revisiones.
+    - name: "Listar revisiones recientes del servicio (más nueva primero)"
+      ansible.builtin.command:
+        cmd: >-
+          gcloud run revisions list
+          --service={{ cloud_run_service }}
+          --region={{ region }}
+          --sort-by=~metadata.creationTimestamp
+          --format=value(metadata.name)
+          --limit=2
+      register: revisions
+      changed_when: false
+
+    - name: "Validar que existe una revisión anterior"
+      ansible.builtin.assert:
+        that:
+          - revisions.stdout_lines | length >= 2
+        fail_msg: "No hay una revisión N-1 a la que hacer rollback en {{ cloud_run_service }}."
+
+    - name: "Fijar nombres de revisión actual y anterior"
+      ansible.builtin.set_fact:
+        current_revision: "{{ revisions.stdout_lines[0] }}"
+        previous_revision: "{{ revisions.stdout_lines[1] }}"
+
+    - name: "Mostrar plan de rollback"
       ansible.builtin.debug:
-        msg: "TODO: listar revisiones de {{ cloud_run_service }}"
+        msg: "Rollback {{ cloud_run_service }}: {{ current_revision }} → {{ previous_revision }} (100% tráfico)"
 
     - name: "Asignar 100% del tráfico a la revisión anterior"
-      # TODO(alumno): `gcloud run services update-traffic` con --to-revisions
-      # apuntando a la versión anterior.
-      ansible.builtin.debug:
-        msg: "TODO: redirigir tráfico a la revisión N-1"
+      ansible.builtin.command:
+        cmd: >-
+          gcloud run services update-traffic {{ cloud_run_service }}
+          --region={{ region }}
+          --to-revisions={{ previous_revision }}=100
+          --quiet
+      register: rollback_result
+      changed_when: "'No changes' not in rollback_result.stderr"
 
     - name: "Anunciar rollback"
       ansible.builtin.debug:

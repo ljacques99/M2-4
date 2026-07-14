@@ -30,7 +30,17 @@ output "cicd_service_account" {
   value       = module.iam.cicd_service_account_email
 }
 
-# TODO(alumno): añade outputs útiles para el siguiente paso (Ansible los va a consumir):
-# - artifact_registry_url
-# - secret_manager_db_secret_id
-# - cualquier nombre que necesite el playbook deploy.yml
+output "artifact_registry_url" {
+  description = "URL del repositorio de Artifact Registry donde se publican las imágenes del OMS."
+  value       = module.compute.artifact_registry_url
+}
+
+output "secret_manager_db_secret_id" {
+  description = "ID del secreto en Secret Manager con la password de la app DB."
+  value       = module.database.db_password_secret_id
+}
+
+output "cloud_run_service_name" {
+  description = "Nombre del servicio Cloud Run (lo consume ansible/group_vars vía cloud_run_service)."
+  value       = "oms-${var.env}"
+}
