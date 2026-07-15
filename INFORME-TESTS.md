@@ -12,7 +12,7 @@ Cambios de esta sesión: nuevo binding IAM (`production_reader`, solo lectura, S
 | `terraform plan -var-file=envs/staging.tfvars` | ✅ **"No changes."** — incluye el nuevo `production_reader` (ya aplicado) y el `github_repository` renombrado |
 | `terraform plan -var-file=envs/production.tfvars` | ✅ **"No changes."** — confirma que el rename de `github_repository` ya estaba aplicado contra la API real en ambos proyectos, no solo en los `.tfvars` |
 | `google_artifact_registry_repository_iam_member.production_reader` | ✅ Verificado con `gcloud artifacts repositories get-iam-policy oms --project=acmeoms-platform` — el binding existe de verdad, no solo en el state |
-| `terraform init -backend=false && terraform validate` | ❌ **Sigue roto** (bug preexistente, no introducido esta sesión — ver `DECISIONES.md` §8): `Error: Missing required argument "bucket"` sobre el bloque `backend "gcs" {}` vacío, reproducido también en la copia limpia |
+| `terraform init -backend=false && terraform validate` | ✅ **Arreglado** (ver `DECISIONES.md` §8): el fallo era dependiente de versión (reproducía con Terraform 1.15.0, no con la 1.7.5 que fija el workflow); se puso un placeholder literal `bucket = "unconfigured"` en `main.tf` para que pase en cualquier versión, verificado con ambos binarios (1.7.5 y 1.15.0) y confirmado que el `-backend-config` real sigue sobrescribiéndolo sin conflicto |
 | `ansible-playbook {deploy,rollback}.yml --syntax-check` | ✅ OK ambos |
 | `ansible-lint playbooks/*.yml roles/oms_cloud_run/tasks/main.yml` | ✅ **Passed: 0 failure(s), 0 warning(s)** |
 | `docker build -f docker/Dockerfile app/` | ✅ Build exitoso (multi-stage, cache reutilizado) |

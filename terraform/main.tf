@@ -14,8 +14,14 @@
 # │     -backend-config="bucket=acmeoms-platform-prod-tfstate" \│
 # │     -backend-config="prefix=oms-platform/production"     │
 # └─────────────────────────────────────────────────────────┘
+# "bucket" tiene un valor placeholder porque `terraform validate` exige el
+# argumento requerido del backend incluso con `init -backend=false` (falla
+# con "Missing required argument" si se deja {} vacío). -backend-config lo
+# sobrescribe igual en el init real de staging/producción.
 terraform {
-  backend "gcs" {}
+  backend "gcs" {
+    bucket = "unconfigured"
+  }
 }
 
 provider "google" {
