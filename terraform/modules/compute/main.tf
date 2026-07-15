@@ -15,6 +15,10 @@ variable "redis_host" { type = string }
 variable "network_id" { type = string }
 variable "vpc_connector_id" { type = string }
 variable "domain_name" { type = string }
+variable "production_cicd_sa_email" {
+  type    = string
+  default = ""
+} # solo se usa en staging
 variable "labels" { type = map(string) }
 
 # ─── Artifact Registry: repositorio Docker del OMS ────────────────
@@ -28,6 +32,20 @@ resource "google_artifact_registry_repository" "oms" {
   docker_config {
     immutable_tags = true
   }
+}
+
+# Solo en staging: da acceso de solo-lectura al SA de CI/CD de producción,
+# para que el job "replicate-to-production" del workflow (environment:
+# production) pueda hacer `docker pull` de la imagen por digest y
+# republicarla en el registry de producción SIN necesitar credenciales de
+# staging. Aislamiento real de vars por Environment en GitHub Actions exige
+# que ese job nunca vea el WIF provider ni el SA de staging.
+resource "google_artifact_registry_repository_iam_member" "production_reader" {
+  count      = var.production_cicd_sa_email != "" ? 1 : 0
+  location   = google_artifact_registry_repository.oms.location
+  repository = google_artifact_registry_repository.oms.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${var.production_cicd_sa_email}"
 }
 
 # ─── Service Account dedicada al runtime ──────────────────────────

@@ -2,6 +2,27 @@
 
 Todas las pruebas de este informe se ejecutaron contra infraestructura **real** en GCP (proyectos `acmeoms-platform` y `acmeoms-platform-prod`), no simulada. Fecha: 2026-07-14.
 
+## 0 · Re-verificación tras el split de CI/CD por Environment (2026-07-15)
+
+Cambios de esta sesión: nuevo binding IAM (`production_reader`, solo lectura, SA de producción → Artifact Registry de staging), split del job `build` en `build`/`replicate-to-production` en `ci-cd.yml`, y el rename `github_repository` → `ljacques99/M2-4` (pendiente desde el 14/07, ya reflejado en el `apply` real de ambos entornos).
+
+| Check | Resultado |
+|---|---|
+| `terraform fmt -check -recursive` | ✅ Sin diferencias |
+| `terraform plan -var-file=envs/staging.tfvars` | ✅ **"No changes."** — incluye el nuevo `production_reader` (ya aplicado) y el `github_repository` renombrado |
+| `terraform plan -var-file=envs/production.tfvars` | ✅ **"No changes."** — confirma que el rename de `github_repository` ya estaba aplicado contra la API real en ambos proyectos, no solo en los `.tfvars` |
+| `google_artifact_registry_repository_iam_member.production_reader` | ✅ Verificado con `gcloud artifacts repositories get-iam-policy oms --project=acmeoms-platform` — el binding existe de verdad, no solo en el state |
+| `terraform init -backend=false && terraform validate` | ❌ **Sigue roto** (bug preexistente, no introducido esta sesión — ver `DECISIONES.md` §8): `Error: Missing required argument "bucket"` sobre el bloque `backend "gcs" {}` vacío, reproducido también en la copia limpia |
+| `ansible-playbook {deploy,rollback}.yml --syntax-check` | ✅ OK ambos |
+| `ansible-lint playbooks/*.yml roles/oms_cloud_run/tasks/main.yml` | ✅ **Passed: 0 failure(s), 0 warning(s)** |
+| `docker build -f docker/Dockerfile app/` | ✅ Build exitoso (multi-stage, cache reutilizado) |
+| Label `org.opencontainers.image.source` del Dockerfile | ✅ `https://github.com/ljacques99/M2-4` (rename aplicado) |
+| `npm ci && npm test` (app) | ✅ `OK: /healthz devuelve 200` |
+| `ci-cd.yml`: parseo YAML + jobs esperados | ✅ 5 jobs: `quality`, `build`, `replicate-to-production`, `deploy-staging`, `deploy-production` |
+| `gitleaks` / `hadolint` | ⏳ No disponibles en este entorno de verificación (sí se corrieron el 14/07, ver §3/§4 más abajo) — sin cambios que afecten a ninguno de los dos desde entonces |
+
+**No verificado (sigue igual que el 14/07):** el workflow de GitHub Actions end-to-end — el repo `ljacques99/M2-4` todavía no existe en GitHub.
+
 ## 1 · Terraform
 
 ### 1.1 `terraform init && terraform plan` — staging
@@ -124,7 +145,7 @@ Sin credenciales estáticas en el repo. Ninguna clave de service account JSON en
 
 ## 5 · CI/CD (WIF)
 
-No se pudo probar `.github/workflows/ci-cd.yml` end-to-end porque el repo de GitHub aún no se ha creado (`ljacques99/oms-platform` es un placeholder — ver README). Verificado estáticamente:
+No se pudo probar `.github/workflows/ci-cd.yml` end-to-end porque el repo de GitHub aún no se ha creado (`ljacques99/M2-4` es un placeholder — ver README). Verificado estáticamente:
 
 | Check | Resultado |
 |---|---|

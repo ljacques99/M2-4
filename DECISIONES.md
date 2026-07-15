@@ -85,9 +85,11 @@ Causa: `google_service_networking_connection.private_vpc_connection` no había t
 `.github/workflows/ci-cd.yml` (no existía, se escribió desde cero):
 
 - Job `quality` (matriz terraform/ansible/app): corre en cada push y PR a `main`, sin tocar GCP.
-- Job `build`: solo en tags `v*`. Autentica por WIF contra el proyecto de staging, construye y publica la imagen por digest, y **replica el mismo digest** al Artifact Registry de producción (dos proyectos aislados ⇒ dos registries, pero el contenido de la imagen es idéntico).
+- Job `build`: solo en tags `v*`. `environment: staging`. Autentica por WIF contra el proyecto de staging, construye y publica la imagen por digest en el Artifact Registry de staging.
+- Job `replicate-to-production`: `environment: production`, `needs: build`. Autentica por WIF contra producción, hace `docker pull` **por digest** desde el registry de staging (solo lectura) y `docker push` al registry de producción — **replica el mismo digest** sin reconstruir la imagen (dos proyectos aislados ⇒ dos registries, contenido idéntico).
 - Jobs `deploy-staging` / `deploy-production`: ambos llaman a `ansible-playbook playbooks/deploy.yml` con el mismo `image_sha` que devolvió el job `build`. La protección de "requiere aprobación humana antes de producción" se apoya en la función nativa de GitHub Environments (`environment: production` + Required reviewers en la configuración del repo), no en lógica custom del workflow.
 - `permissions: id-token: write` a nivel de workflow; cero secretos de tipo `GCP_SA_KEY_JSON` — todo son `vars` (IDs de proyecto, WIF provider, emails de SA), que no son sensibles.
+- **Aislamiento de credenciales por Environment**: las 6 `vars` (`{STAGING,PRODUCTION}_{WIF_PROVIDER,CICD_SA,PROJECT_ID}`) están scoped por Environment en GitHub, no a nivel de repo — un job con `environment: production` nunca ve las vars de staging y viceversa. Esto obligó a partir en dos el job `build` original (que autenticaba primero como staging y luego como producción en el mismo job): el job de producción ya no puede tener credenciales de staging para hacer `pull` de la imagen. Se resolvió dándole al SA de CI/CD de producción `roles/artifactregistry.reader` (**solo lectura, un único sentido**) sobre el Artifact Registry de staging — `google_artifact_registry_repository_iam_member.production_reader` en `modules/compute/main.tf`, condicionado a `production_cicd_sa_email` (solo seteado en `staging.tfvars`). Aplicado con `terraform apply` real contra `acmeoms-platform`.
 
 ## 7. Bugs adicionales encontrados durante el despliegue y deploy reales (post-apply)
 
@@ -113,5 +115,6 @@ También se probó `rollback.yml` de verdad contra staging: movió el 100% del t
 
 ## 8. Pendiente / fuera de alcance de esta sesión
 
-- El repo de GitHub aún no existe (`ljacques99/oms-platform` es el nombre reservado en `github_repository` de las `tfvars`, a confirmar cuando se cree).
+- El repo de GitHub aún no existe (`ljacques99/M2-4` es el nombre reservado en `github_repository` de las `tfvars`, a confirmar cuando se cree). Como el repo GitLab actual tiene `oms-platform/` como subcarpeta, hace falta decidir cómo se crea el repo GitHub para que `.github/workflows/` quede en su raíz (GitHub Actions no detecta workflows anidados).
+- **Bug encontrado sin arreglar**: `terraform init -backend=false && terraform validate` (paso `quality` del workflow) falla con `Error: Missing required argument` sobre el bloque `backend "gcs" {}` vacío, reproducido en una copia limpia del directorio con Terraform 1.15.0 — `-backend=false` no exime al bloque backend de su chequeo de esquema en esta versión. El job `quality` del CI fallaría hoy mismo en el check de Terraform. Pendiente de solución (candidatas: pasar `-backend-config` dummy antes de validar, o separar `validate` en un módulo sin bloque `backend`).
 - Bonus no implementados: multi-region DR, Cloud CDN con políticas finas más allá de lo básico, bastion VM con Datadog, CMEK propia, runbook de expand-and-contract. Se priorizó el 100% de la rúbrica base con infraestructura real y verificada antes que sumar bonus sobre una base sin probar.

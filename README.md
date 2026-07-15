@@ -186,11 +186,12 @@ ansible-playbook playbooks/deploy.yml -e env=production -e image_sha=$IMAGE_SHA
 `.github/workflows/ci-cd.yml`:
 
 - En cada push/PR a `main`: lint + validate (`terraform fmt/validate`, `ansible-lint`, `npm test`, `hadolint`). No toca GCP, no necesita credenciales.
-- En un tag `v*`: build + push de la imagen (por digest, replicada al Artifact Registry de ambos proyectos), deploy a staging, y promoción a producción con el **mismo digest**.
-- Autenticación 100% por **Workload Identity Federation** — cero secretos `GCP_SA_KEY_JSON`. Variables de repo/entorno necesarias (no son secretas, son IDs):
-  `STAGING_WIF_PROVIDER`, `STAGING_CICD_SA`, `STAGING_PROJECT_ID`, `PRODUCTION_WIF_PROVIDER`, `PRODUCTION_CICD_SA`, `PRODUCTION_PROJECT_ID` (los tres primeros salen de `terraform output workload_identity_provider` / `cicd_service_account` / `var.project_id` en cada entorno).
+- En un tag `v*`: `build` (environment `staging`) construye y publica la imagen por digest en el Artifact Registry de staging → `replicate-to-production` (environment `production`) hace `pull` por digest y `push` al Artifact Registry de producción, sin reconstruir → `deploy-staging` → `deploy-production`, ambos con el **mismo digest**.
+- Autenticación 100% por **Workload Identity Federation** — cero secretos `GCP_SA_KEY_JSON`. 6 variables necesarias (no son secretas, son IDs), **scoped por GitHub Environment** (`staging` / `production`), no a nivel de repo — así un job con `environment: production` nunca puede leer las vars de staging y viceversa:
+  `STAGING_WIF_PROVIDER`, `STAGING_CICD_SA`, `STAGING_PROJECT_ID` (Environment `staging`) y `PRODUCTION_WIF_PROVIDER`, `PRODUCTION_CICD_SA`, `PRODUCTION_PROJECT_ID` (Environment `production`) — los WIF provider/SA salen de `terraform output workload_identity_provider` / `cicd_service_account` en cada entorno.
+- Como el job `replicate-to-production` necesita leer la imagen de staging sin tener credenciales de staging, el SA de CI/CD de producción tiene `roles/artifactregistry.reader` (solo lectura, un único sentido) sobre el Artifact Registry de staging — ver `production_cicd_sa_email` en `terraform/envs/staging.tfvars` y el binding en `terraform/modules/compute/main.tf`.
 - El `attribute_condition` del pool WIF (`terraform/modules/iam/main.tf`) restringe el trust a `assertion.repository == "<owner>/<repo>"` y `assertion.ref.startsWith("refs/tags/v")` — ni siquiera un fork del repo puede desplegar.
-- La protección real de "promote a producción" (aprobación manual) se configura en GitHub → Settings → Environments → `production` → Required reviewers. Sin esa protección activada en la UI, el job se dispara automáticamente tras staging.
+- La protección real de "promote a producción" (aprobación manual) se configura en GitHub → Settings → Environments → `production` → Required reviewers. Sin esa protección activada en la UI, el job se dispara automáticamente tras `deploy-staging`.
 
 ## Decisiones
 

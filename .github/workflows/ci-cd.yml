@@ -82,19 +82,22 @@ jobs:
           dockerfile: docker/Dockerfile
           failure-threshold: warning
 
-  # ── Build + push: SOLO en tags v* (release), nunca en push a main a secas ──
+  # ── Build + push a staging: SOLO en tags v* (release) ──
+  # environment: staging → este job SOLO ve las vars STAGING_*. Nunca tiene
+  # ni ve credenciales de producción (aislamiento real, no solo convención).
   build:
-    name: "Build & push imagen"
+    name: "Build & push imagen (staging)"
     needs: quality
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: staging
     outputs:
       image_sha: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
       - id: auth
-        name: "Autenticar vía WIF (staging SA — build/push viven en el proyecto de staging)"
+        name: "Autenticar vía WIF (staging SA)"
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.STAGING_WIF_PROVIDER }}
@@ -121,26 +124,37 @@ jobs:
             | cut -d'@' -f2)
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
-      - name: "Replicar el MISMO digest al repo de producción"
-        # Dos proyectos GCP aislados → dos Artifact Registry. El CONTENIDO de
-        # la imagen (su digest) es idéntico; solo cambia dónde vive, para que
-        # staging y producción desplieguen exactamente el mismo binario
-        # (penalización -10pts si no coincide el SHA).
-        run: |
-          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms@${{ steps.push.outputs.digest }} \
-            ${{ env.REGION }}-docker.pkg.dev/${{ vars.PRODUCTION_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
-          # Cambiar de SA/proyecto exige reautenticar vía WIF de producción.
-
+  # ── Replicar el MISMO digest a producción ──
+  # environment: production → este job SOLO ve las vars PRODUCTION_*. Para
+  # promover la imagen sin rebuild (mismo SHA en ambos entornos) sin tener
+  # nunca credenciales de staging, el SA de producción tiene acceso de
+  # solo-lectura al Artifact Registry de staging (terraform/modules/compute,
+  # binding condicionado a production_cicd_sa_email en staging.tfvars).
+  replicate-to-production:
+    name: "Replicar imagen → producción"
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
       - id: auth_prod
-        name: "Reautenticar vía WIF (producción SA — solo para el push de imagen)"
+        name: "Autenticar vía WIF (producción SA)"
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.PRODUCTION_WIF_PROVIDER }}
           service_account: ${{ vars.PRODUCTION_CICD_SA }}
 
-      - name: "Push a Artifact Registry de producción"
+      - name: "Configurar Docker para Artifact Registry (ambos proyectos)"
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: "Pull por digest desde staging (solo lectura) + push a producción"
+        # Dos proyectos GCP aislados → dos Artifact Registry. El CONTENIDO de
+        # la imagen (su digest) es idéntico; solo cambia dónde vive, para que
+        # staging y producción desplieguen exactamente el mismo binario
+        # (penalización -10pts si no coincide el SHA).
         run: |
-          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+          docker pull ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms@${{ needs.build.outputs.image_sha }}
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms@${{ needs.build.outputs.image_sha }} \
+            ${{ env.REGION }}-docker.pkg.dev/${{ vars.PRODUCTION_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ vars.PRODUCTION_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/oms:${{ github.ref_name }}
 
   # ── Deploy a staging: siempre automático tras el build de un tag ──
@@ -176,7 +190,7 @@ jobs:
   # activada, este job se ejecuta igualmente en cuanto termina staging.
   deploy-production:
     name: "Promote → production"
-    needs: [build, deploy-staging]
+    needs: [build, deploy-staging, replicate-to-production]
     runs-on: ubuntu-latest
     environment: production
     steps:

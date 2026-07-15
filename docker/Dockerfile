@@ -51,7 +51,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 
-LABEL org.opencontainers.image.source="https://github.com/ljacques99/oms-platform" \
+LABEL org.opencontainers.image.source="https://github.com/ljacques99/M2-4" \
       org.opencontainers.image.title="oms-platform" \
       org.opencontainers.image.description="Monolito modular AcmeOMS (Catalog, Inventory, Orders, Payments, Billing, IAM)" \
       org.opencontainers.image.vendor="AcmeOMS" \

@@ -25,6 +25,12 @@ image_sha  = "sha256:3beb8d6dd8bac1c597d10f3ddf59f5f684d6054ab589c4334c0486dad07
 
 deletion_protection = true # también en staging
 
-github_repository = "ljacques99/oms-platform"
+github_repository = "ljacques99/M2-4"
+
+# Le da al SA de CI/CD de producción acceso de solo-lectura a este Artifact
+# Registry, para que el job "replicate-to-production" (environment:
+# production en GitHub Actions) pueda promover la imagen por digest sin
+# tener nunca credenciales de staging. Solo lectura, un único sentido.
+production_cicd_sa_email = "oms-production-cicd@acmeoms-platform-prod.iam.gserviceaccount.com"
 
 domain_name = "oms-staging.evolversfr.com"

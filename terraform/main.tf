@@ -74,20 +74,21 @@ module "database" {
 module "compute" {
   source = "./modules/compute"
 
-  project_id              = var.project_id
-  region                  = var.region
-  env                     = var.env
-  image_repo              = var.image_repo
-  image_sha               = var.image_sha
-  cloud_run_min_instances = var.cloud_run_min_instances
-  cloud_run_max_instances = var.cloud_run_max_instances
-  db_connection_name      = module.database.db_connection_name
-  db_secret_id            = module.database.db_password_secret_id
-  redis_host              = module.database.redis_host
-  network_id              = module.network.network_id
-  vpc_connector_id        = module.network.vpc_connector_id
-  domain_name             = var.domain_name
-  labels                  = local.common_labels
+  project_id               = var.project_id
+  region                   = var.region
+  env                      = var.env
+  image_repo               = var.image_repo
+  image_sha                = var.image_sha
+  cloud_run_min_instances  = var.cloud_run_min_instances
+  cloud_run_max_instances  = var.cloud_run_max_instances
+  db_connection_name       = module.database.db_connection_name
+  db_secret_id             = module.database.db_password_secret_id
+  redis_host               = module.database.redis_host
+  network_id               = module.network.network_id
+  vpc_connector_id         = module.network.vpc_connector_id
+  domain_name              = var.domain_name
+  production_cicd_sa_email = var.production_cicd_sa_email
+  labels                   = local.common_labels
 }
 
 # ┌─────────────────────────────────────────────────────────┐

@@ -71,6 +71,12 @@ variable "github_repository" {
   default     = "acme-org/oms-platform"
 }
 
+variable "production_cicd_sa_email" {
+  type        = string
+  description = "Email del SA de CI/CD de producción. Solo se usa en staging.tfvars: le da acceso de solo lectura al Artifact Registry local, para que el job 'replicate-to-production' del workflow pueda hacer pull por digest sin necesitar credenciales de staging. Vacío ('') en producción — no crea ningún binding."
+  default     = ""
+}
+
 variable "domain_name" {
   type        = string
   description = "Dominio público servido por el Load Balancer (usado en el certificado SSL gestionado)."
